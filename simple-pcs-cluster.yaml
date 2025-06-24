@@ -1,0 +1,466 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'Simple AWS PCS cluster for verification - 1 login node (t3.micro) and up to 4 compute nodes (m7i.large) with EFS storage'
+
+Parameters:
+  ClusterName:
+    Type: String
+    Default: 'simple-pcs-cluster'
+    Description: 'Name of the PCS cluster'
+
+Resources:
+  # VPC
+  VPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: '10.0.0.0/16'
+      EnableDnsHostnames: true
+      EnableDnsSupport: true
+      Tags:
+        - Key: Name
+          Value: !Sub '${ClusterName}-vpc'
+
+  # Internet Gateway
+  InternetGateway:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags:
+        - Key: Name
+          Value: !Sub '${ClusterName}-igw'
+
+  InternetGatewayAttachment:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      InternetGatewayId: !Ref InternetGateway
+      VpcId: !Ref VPC
+
+  # Public Subnet
+  PublicSubnet1:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      AvailabilityZone: !Select [0, !GetAZs '']
+      CidrBlock: '10.0.1.0/24'
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: !Sub '${ClusterName}-public-subnet-1'
+
+  PublicSubnet2:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      AvailabilityZone: !Select [1, !GetAZs '']
+      CidrBlock: '10.0.2.0/24'
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: !Sub '${ClusterName}-public-subnet-2'
+
+  PublicSubnet3:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      AvailabilityZone: !Select [2, !GetAZs '']
+      CidrBlock: '10.0.3.0/24'
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: !Sub '${ClusterName}-public-subnet-3'
+
+  # Private Subnet
+  PrivateSubnet1:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      AvailabilityZone: !Select [0, !GetAZs '']
+      CidrBlock: '10.0.11.0/24'
+      Tags:
+        - Key: Name
+          Value: !Sub '${ClusterName}-private-subnet-1'
+
+  PrivateSubnet2:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      AvailabilityZone: !Select [1, !GetAZs '']
+      CidrBlock: '10.0.12.0/24'
+      Tags:
+        - Key: Name
+          Value: !Sub '${ClusterName}-private-subnet-2'
+
+  PrivateSubnet3:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      AvailabilityZone: !Select [2, !GetAZs '']
+      CidrBlock: '10.0.13.0/24'
+      Tags:
+        - Key: Name
+          Value: !Sub '${ClusterName}-private-subnet-3'
+
+  # Isolated Subnet
+  IsolatedSubnet1:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      AvailabilityZone: !Select [0, !GetAZs '']
+      CidrBlock: '10.0.21.0/24'
+      Tags:
+        - Key: Name
+          Value: !Sub '${ClusterName}-isolated-subnet-1'
+
+  IsolatedSubnet2:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      AvailabilityZone: !Select [1, !GetAZs '']
+      CidrBlock: '10.0.22.0/24'
+      Tags:
+        - Key: Name
+          Value: !Sub '${ClusterName}-isolated-subnet-2'
+
+  IsolatedSubnet3:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      AvailabilityZone: !Select [2, !GetAZs '']
+      CidrBlock: '10.0.23.0/24'
+      Tags:
+        - Key: Name
+          Value: !Sub '${ClusterName}-isolated-subnet-3'
+
+  # NAT Gateway
+  NatGateway1EIP:
+    Type: AWS::EC2::EIP
+    DependsOn: InternetGatewayAttachment
+    Properties:
+      Domain: vpc
+
+  NatGateway1:
+    Type: AWS::EC2::NatGateway
+    Properties:
+      AllocationId: !GetAtt NatGateway1EIP.AllocationId
+      SubnetId: !Ref PublicSubnet1
+
+  # Route Tables
+  PublicRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+        - Key: Name
+          Value: !Sub '${ClusterName}-public-routes'
+
+  DefaultPublicRoute:
+    Type: AWS::EC2::Route
+    DependsOn: InternetGatewayAttachment
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      DestinationCidrBlock: '0.0.0.0/0'
+      GatewayId: !Ref InternetGateway
+
+  PublicSubnet1RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      SubnetId: !Ref PublicSubnet1
+
+  PublicSubnet2RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      SubnetId: !Ref PublicSubnet2
+
+  PublicSubnet3RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      SubnetId: !Ref PublicSubnet3
+
+  PrivateRouteTable1:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+        - Key: Name
+          Value: !Sub '${ClusterName}-private-routes-1'
+
+  DefaultPrivateRoute1:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref PrivateRouteTable1
+      DestinationCidrBlock: '0.0.0.0/0'
+      NatGatewayId: !Ref NatGateway1
+
+  PrivateSubnet1RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref PrivateRouteTable1
+      SubnetId: !Ref PrivateSubnet1
+
+  PrivateSubnet2RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref PrivateRouteTable1
+      SubnetId: !Ref PrivateSubnet2
+
+  PrivateSubnet3RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref PrivateRouteTable1
+      SubnetId: !Ref PrivateSubnet3
+
+  # Security Groups
+  ClusterSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: !Sub '${ClusterName}-cluster-sg'
+      GroupDescription: 'Security group for PCS cluster'
+      VpcId: !Ref VPC
+      Tags:
+        - Key: Name
+          Value: !Sub '${ClusterName}-cluster-sg'
+
+  # Self-referencing security group - allow all protocols within the same security group
+  ClusterSecurityGroupIngressSelfRef:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId: !Ref ClusterSecurityGroup
+      IpProtocol: -1
+      SourceSecurityGroupId: !Ref ClusterSecurityGroup
+
+  # Outbound rules - allow all outbound traffic
+  ClusterSecurityGroupEgressAll:
+    Type: AWS::EC2::SecurityGroupEgress
+    Properties:
+      GroupId: !Ref ClusterSecurityGroup
+      IpProtocol: -1
+      CidrIp: 0.0.0.0/0
+
+  ClusterSecurityGroupEgressSelfRef:
+    Type: AWS::EC2::SecurityGroupEgress
+    Properties:
+      GroupId: !Ref ClusterSecurityGroup
+      IpProtocol: -1
+      DestinationSecurityGroupId: !Ref ClusterSecurityGroup
+
+  EFSSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: !Sub '${ClusterName}-efs-sg'
+      GroupDescription: 'Security group for EFS'
+      VpcId: !Ref VPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 2049
+          ToPort: 2049
+          SourceSecurityGroupId: !Ref ClusterSecurityGroup
+      Tags:
+        - Key: Name
+          Value: !Sub '${ClusterName}-efs-sg'
+
+  # EFS
+  EFSFileSystem:
+    Type: AWS::EFS::FileSystem
+    Properties:
+      PerformanceMode: generalPurpose
+      ThroughputMode: bursting
+      Encrypted: true
+      FileSystemTags:
+        - Key: Name
+          Value: !Sub '${ClusterName}-efs'
+
+  EFSMountTarget1:
+    Type: AWS::EFS::MountTarget
+    Properties:
+      FileSystemId: !Ref EFSFileSystem
+      SubnetId: !Ref PrivateSubnet1
+      SecurityGroups:
+        - !Ref EFSSecurityGroup
+
+  EFSMountTarget2:
+    Type: AWS::EFS::MountTarget
+    Properties:
+      FileSystemId: !Ref EFSFileSystem
+      SubnetId: !Ref PrivateSubnet2
+      SecurityGroups:
+        - !Ref EFSSecurityGroup
+
+  EFSMountTarget3:
+    Type: AWS::EFS::MountTarget
+    Properties:
+      FileSystemId: !Ref EFSFileSystem
+      SubnetId: !Ref PrivateSubnet3
+      SecurityGroups:
+        - !Ref EFSSecurityGroup
+
+  # IAM Role for PCS Instance
+  PCSInstanceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub 'AWSPCS-${AWS::StackName}-${AWS::Region}'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ec2.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
+      Policies:
+        - PolicyName: PCSComputeNodePolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - pcs:RegisterComputeNodeGroupInstance
+                Resource: '*'
+
+  PCSInstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Roles:
+        - !Ref PCSInstanceRole
+
+  # Launch Template
+  PCSLaunchTemplate:
+    Type: AWS::EC2::LaunchTemplate
+    Properties:
+      LaunchTemplateName: !Sub '${ClusterName}-launch-template'
+      LaunchTemplateData:
+        ImageId: 'ami-004a4ae6bc74a1a1a'
+        SecurityGroupIds:
+          - !Ref ClusterSecurityGroup
+        IamInstanceProfile:
+          Arn: !GetAtt PCSInstanceProfile.Arn
+        UserData:
+          Fn::Base64: !Sub |
+            MIME-Version: 1.0
+            Content-Type: multipart/mixed; boundary="==BOUNDARY=="
+            
+            --==BOUNDARY==
+            Content-Type: text/x-shellscript; charset="us-ascii"
+            
+            #!/bin/bash
+            yum update -y
+            yum install -y amazon-efs-utils
+            mkdir -p /shared
+            echo "${EFSFileSystem}.efs.${AWS::Region}.amazonaws.com:/ /shared efs defaults,_netdev" >> /etc/fstab
+            mount -a
+            chown ec2-user:ec2-user /shared
+            chmod 755 /shared
+            
+            # Add Slurm commands to PATH for all users
+            echo 'export PATH=/opt/slurm/bin:$PATH' >> /etc/profile.d/slurm.sh
+            chmod +x /etc/profile.d/slurm.sh
+            
+            # Add to ec2-user's bashrc for immediate availability
+            echo 'export PATH=/opt/slurm/bin:$PATH' >> /home/ec2-user/.bashrc
+            chown ec2-user:ec2-user /home/ec2-user/.bashrc
+            
+            --==BOUNDARY==--
+        MetadataOptions:
+          HttpTokens: required
+          HttpPutResponseHopLimit: 2
+          HttpEndpoint: enabled
+
+  # PCS Cluster
+  PCSCluster:
+    Type: AWS::PCS::Cluster
+    Properties:
+      Name: !Ref ClusterName
+      Size: SMALL
+      Scheduler:
+        Type: SLURM
+        Version: '24.11'
+      Networking:
+        SubnetIds:
+          - !Ref PrivateSubnet1
+        SecurityGroupIds:
+          - !Ref ClusterSecurityGroup
+
+  # Login Node Group
+  LoginNodeGroup:
+    Type: AWS::PCS::ComputeNodeGroup
+    Properties:
+      ClusterId: !GetAtt PCSCluster.Id
+      Name: login
+      ScalingConfiguration:
+        MinInstanceCount: 1
+        MaxInstanceCount: 1
+      IamInstanceProfileArn: !GetAtt PCSInstanceProfile.Arn
+      CustomLaunchTemplate:
+        TemplateId: !Ref PCSLaunchTemplate
+        Version: 1
+      SubnetIds:
+        - !Ref PublicSubnet1
+      AmiId: 'ami-004a4ae6bc74a1a1a'
+      InstanceConfigs:
+        - InstanceType: 't3.micro'
+
+  # Compute Node Group
+  ComputeNodeGroup:
+    Type: AWS::PCS::ComputeNodeGroup
+    Properties:
+      ClusterId: !GetAtt PCSCluster.Id
+      Name: compute
+      ScalingConfiguration:
+        MinInstanceCount: 0
+        MaxInstanceCount: 4
+      IamInstanceProfileArn: !GetAtt PCSInstanceProfile.Arn
+      CustomLaunchTemplate:
+        TemplateId: !Ref PCSLaunchTemplate
+        Version: 1
+      SubnetIds:
+        - !Ref PrivateSubnet1
+      AmiId: 'ami-004a4ae6bc74a1a1a'
+      InstanceConfigs:
+        - InstanceType: 'm7i.large'
+
+  # Queue
+  ComputeQueue:
+    Type: AWS::PCS::Queue
+    Properties:
+      ClusterId: !GetAtt PCSCluster.Id
+      Name: compute-queue
+      ComputeNodeGroupConfigurations:
+        - ComputeNodeGroupId: !GetAtt ComputeNodeGroup.Id
+
+Outputs:
+  ClusterId:
+    Description: 'The ID of the PCS cluster'
+    Value: !GetAtt PCSCluster.Id
+    Export:
+      Name: !Sub '${AWS::StackName}-ClusterId'
+
+  VPCId:
+    Description: 'The ID of the VPC'
+    Value: !Ref VPC
+    Export:
+      Name: !Sub '${AWS::StackName}-VPCId'
+
+  EFSFileSystemId:
+    Description: 'The ID of the EFS file system'
+    Value: !Ref EFSFileSystem
+    Export:
+      Name: !Sub '${AWS::StackName}-EFSFileSystemId'
+
+  PCSConsoleUrl:
+    Description: 'URL to access the cluster in the PCS console'
+    Value: !Sub 'https://${AWS::Region}.console.aws.amazon.com/pcs/home?region=${AWS::Region}#/clusters/${PCSCluster.Id}'
+    Export:
+      Name: !Sub '${AWS::StackName}-PCSConsoleUrl'
+
+  EC2ConsoleUrl:
+    Description: 'URL to access login node instances via Session Manager'
+    Value: !Sub 'https://${AWS::Region}.console.aws.amazon.com/ec2/home?region=${AWS::Region}#Instances:instanceState=running;tag:aws:pcs:compute-node-group-id=${LoginNodeGroup.Id}'
+    Export:
+      Name: !Sub '${AWS::StackName}-EC2ConsoleUrl'
+
+  PCSInstanceRoleArn:
+    Description: 'ARN of the PCS Instance Role with vended log delivery permissions'
+    Value: !GetAtt PCSInstanceRole.Arn
+    Export:
+      Name: !Sub '${AWS::StackName}-PCSInstanceRoleArn'
